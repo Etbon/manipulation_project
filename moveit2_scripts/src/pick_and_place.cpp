@@ -1,4 +1,5 @@
 #include "geometry_msgs/msg/detail/pose_stamped__struct.hpp"
+#include "rclcpp/duration.hpp"
 #include "rclcpp/logging.hpp"
 #include "rclcpp/rclcpp.hpp"
 #include <cmath>
@@ -6,6 +7,8 @@
 #include <moveit/planning_scene_interface/planning_scene_interface.h>
 #include <moveit/move_group_interface/move_group_interface.h>
 #include <geometry_msgs/msg/pose_stamped.hpp>
+#include <moveit/robot_trajectory/robot_trajectory.h>
+#include <moveit/trajectory_processing/iterative_time_parameterization.h>
 
 #include <cstdio>
 #include <string>
@@ -36,13 +39,6 @@ class PickAndPlace : public rclcpp::Node {
         return false;
       }
 
-      // Slow motion is useful while validating the simulation setup 
-      arm_->setMaxVelocityScalingFactor(0.10);
-      arm_->setMaxAccelerationScalingFactor(0.10);
-
-      gripper_->setMaxVelocityScalingFactor(0.10);
-      gripper_->setMaxAccelerationScalingFactor(0.10);
-
       tool_link_ = arm_->getEndEffectorLink();
       const auto *gripper_model = gripper_->getRobotModel()->getJointModelGroup("gripper");
       
@@ -60,7 +56,6 @@ class PickAndPlace : public rclcpp::Node {
     // Arm movement logic 
     // -----------------
     bool run_pick_and_place() {
-
       // Remeber the starting joint postion 
       const auto initial_state = arm_->getCurrentState(2.0);
 
@@ -68,6 +63,18 @@ class PickAndPlace : public rclcpp::Node {
         RCLCPP_ERROR(get_logger(), "Cannot read the starting robot state.");
         return false;
       }
+
+      // Set Robot arm in the corret configuration
+      moveit::core::RobotState start_target =*initial_state;
+      // Add the destion pose
+      start_target.setJointGroupPositions("ur_manipulator", make_home_joint_target());
+      
+      Plan start_plan;
+      if (!plan_arm_joint_motion(start_target, start_plan)) return false;
+      if (!execute_arm_motion(start_plan)) return false;
+
+
+
 
       // Call make_pregrasp_pose() and store its retrun pose
       const auto pregraspe_pose = make_pregrasp_pose();
@@ -85,9 +92,11 @@ class PickAndPlace : public rclcpp::Node {
 
       // Creat a Plan object for the gripper 
       Plan open_plan;
+      
       // Plan gripper 
       if (!plan_gripper_name_motion("gripper_open", open_plan)) return false;
       RCLCPP_INFO(get_logger(), "Plan gripper.");
+
       // Execute gripper
       if (!execute_gripper_motion(open_plan)) return false;
       RCLCPP_INFO(get_logger(), "Execute open gripper.");
@@ -96,19 +105,31 @@ class PickAndPlace : public rclcpp::Node {
       const auto grasp_pose = make_grasp_pose(pregraspe_pose); 
       
       Plan approach_plan;
+
       // Decent toward the block 
+      RCLCPP_INFO(get_logger(), "STEP 1: planning approach");
       if(!plan_cartesian_motion(grasp_pose, approach_plan)) return false;
+      
       // Ececute arm motion
+      RCLCPP_INFO(get_logger(), "STEP 2: executing approach");
       if (!execute_arm_motion(approach_plan)) return false;
 
+      RCLCPP_INFO(get_logger(), "STEP 3: approach finish");
+      
       // Close gripper 
       Plan close_plan;
+
       // Plan gripper 
+      RCLCPP_INFO(get_logger(), "STEP 4: planing gripper close");
       if (!plan_gripper_joint_motion(kCloseAngle, close_plan)) return false;
+      
       RCLCPP_INFO(get_logger(),"Plan gripper...");
+      
       // Execute gripper
+      RCLCPP_INFO(get_logger(), "STEP 5: execute gripper close");
       if (!execute_gripper_motion(close_plan)) return false;
-      RCLCPP_INFO(get_logger(), "Execute close gripper.");
+
+      RCLCPP_INFO(get_logger(), "STEP 6: gripper close succeded.");
 
       // Lift object up 
       Plan lift_object;
@@ -150,9 +171,24 @@ class PickAndPlace : public rclcpp::Node {
       if (!execute_gripper_motion(realese_plan)) return false;
 
 
+      // Read a fresh, complet robot state
+      const auto home_start = arm_->getCurrentState(2.0);
+
+      if (!home_start) {
+        RCLCPP_ERROR(get_logger(), "Cannot read robot state before returning home");
+        return false;
+      }
+
+      // Make a seperate robot state that we can  edito into the home target 
+      moveit::core::RobotState home_target = *home_start;
+
+      const auto home_angle = make_home_joint_target();
+
+      home_target.setJointGroupPositions("ur_manipulator", home_angle);
+
       // Move to the original position
       Plan return_plan;
-      if (!plan_arm_joint_motion(*initial_state, return_plan)) return false;
+      if (!plan_arm_joint_motion(home_target, return_plan)) return false;
       if (!execute_arm_motion(return_plan)) return false;  
     
       return true;
@@ -167,7 +203,7 @@ class PickAndPlace : public rclcpp::Node {
     using Pose = geometry_msgs::msg::Pose;
 
     static constexpr double kSpeedScale = 0.10;   
-    static constexpr double kApproachDistance = 0.05;  // metres requeted 5 cm 
+    static constexpr double kApproachDistance = 0.09;  // metres requeted 9 cm 
     static constexpr double kCloseAngle = 0.64;       // radians
     
     std::unique_ptr<MoveGroupInterface> arm_;
@@ -177,12 +213,13 @@ class PickAndPlace : public rclcpp::Node {
 
     std::vector<double> make_home_joint_target() {
       return {
-        0.0000,    // Shoulder pan
-        -2.3562,   // Shoulder lift
-        1.5708,    // Elbow
-        -1.5708,   // Wrist 1
-        -1.5708,   // Wrist 2
-        0.0000,    // Wrist 3
+        6.16969278892654e-05,    // Shoulder pan
+       -1.5699998774255732,      // Shoulder lift
+        4.233447121748668e-07,   // Elbow
+       -1.5699997590295565,      // Wrist 1
+       -2.0611261580150142e-05,  // Wrist 2
+       -1.365010196607841e-05,   // Wrist 3
+
       };    
     }
 
@@ -221,7 +258,7 @@ class PickAndPlace : public rclcpp::Node {
     geometry_msgs::msg::PoseStamped make_grasp_pose(const geometry_msgs::msg::PoseStamped &pregrasp) {
 
       auto grasp_pose = pregrasp;
-      grasp_pose.pose.position.z -= 0.09;
+      grasp_pose.pose.position.z -= kApproachDistance;
 
       return grasp_pose;
     }
@@ -328,7 +365,23 @@ class PickAndPlace : public rclcpp::Node {
         RCLCPP_ERROR(get_logger(), "Cartesian palnning failed. Fraction: %.3f", fraction);
         return false;
       }
-  
+
+      // Access the joint trajectory points to inspect their timing
+      const auto &points = plan.trajectory_.joint_trajectory.points;
+
+      // Stop if there are not trajectory points to inspets
+      if (points.empty()) {
+        RCLCPP_ERROR(get_logger(), "Cartesian trajectory is empty.");
+        return false;
+      }
+
+      // Read the planned time needed to reach the final point
+      const double duration = rclcpp::Duration(points.back().time_from_start).seconds();
+    
+      // Print degubing 
+      RCLCPP_INFO(get_logger(), "Cartesian target Z=%.3f m; planned duration= %.3f s", 
+        target_pose.pose.position.z, duration);
+
       return true;
 
     }
