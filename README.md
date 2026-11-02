@@ -119,41 +119,6 @@ The final home target is a fixed configuration in the code, rather than the join
 
 Each planning helper creates a trajectory. Its execution helper then waits for MoveIt to report the execution result. A failed helper ends the sequence immediately.
 
-### Why combine a joint waypoint and Cartesian motion?
-
-A joint target specifies the arm's configuration. A tool pose specifies a position and orientation, which may have several inverse-kinematics solutions. Planning directly to a tool pose can therefore produce an unexpected change in arm posture.
-
-The intermediate joint waypoint selects a posture near the pick area. The following Cartesian adjustment takes the tool to the precise pregrasp pose. This can reduce unwanted configuration changes, but the complete path still needs collision checking and validation against the real setup.
-
-The stored waypoint is defined in `pre_grasp_position()`, and the home configuration is defined in `make_home_joint_target()`. Their vectors must follow the joint order in the `ur_manipulator` planning group. Do not copy values directly from a `/joint_states` message without matching each value to its joint name.
-
-## Targets and settings
-
-The following values describe the current source. Distances are in metres and joint angles are in radians.
-
-| Setting | Current value | Location |
-| --- | --- | --- |
-| Arm planning group | `ur_manipulator` | `initialize_moveit()` |
-| Gripper planning group | `gripper` | `initialize_moveit()` |
-| Cartesian target frame | `base_link` | `make_pregrasp_pose()` |
-| Default pick X | `0.339984` | `pick_x` ROS parameter fallback |
-| Default pick Y | `-0.020271` | `pick_y` ROS parameter fallback |
-| Real launch pick X / Y | `0.343` / `0.132` | Real task launch parameters |
-| Pregrasp tool height | `0.264` | `make_pregrasp_pose()` |
-| Tool orientation, quaternion X/Y/Z/W | `-1 / 0 / 0 / 0` | `make_pregrasp_pose()` |
-| Approach distance | `0.07` | `kApproachDistance` |
-| Resulting grasp tool height | `0.194` | Pregrasp height minus approach distance |
-| Gripper close target | `0.70` | `kCloseAngle` |
-| Controlled gripper joint | `robotiq_85_left_knuckle_joint` | Gripper planning helper |
-| Cartesian sampling step | `0.005` | `plan_cartesian_motion()` |
-| Cartesian jump threshold | `2.0` | Relative joint-jump factor, not an angle |
-
-Some source comments still mention a 9 cm approach; the current constant requests **7 cm**. The target height refers to the selected end-effector link, obtained through `getEndEffectorLink()`, rather than directly to the fingertips. Confirm that link and its offset before changing heights.
-
-To change the real pick coordinates, edit the parameter dictionary in [`pick_and_place_real.launch.py`](moveit2_scripts/launch/pick_and_place_real.launch.py). The current launch file does not declare `pick_x` or `pick_y` as launch arguments. Other settings in the table are currently changed in C++; rebuild `moveit2_scripts` after editing them.
-
-`kSpeedScale` is declared as `0.10`, but the application does not apply it through MoveIt's velocity or acceleration scaling setters. Its presence does not establish a 10% motion speed.
-
 ## Controller connections
 
 MoveIt sends arm trajectories through a `FollowJointTrajectory` action and gripper commands through a `GripperCommand` action.
