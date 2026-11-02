@@ -73,7 +73,14 @@ class PickAndPlace : public rclcpp::Node {
       if (!plan_arm_joint_motion(start_target, start_plan)) return false;
       if (!execute_arm_motion(start_plan)) return false;
 
+      
+      // Safe postion before pregrasp 
+      moveit::core::RobotState safety_target = *initial_state;
+      safety_target.setJointGroupPositions("ur_manipulator", pre_grasp_position());
 
+      Plan safety_plan;
+      if (!plan_arm_joint_motion(safety_target, safety_plan)) return false;
+      if (!execute_arm_motion(safety_plan)) return false;
 
 
       // Call make_pregrasp_pose() and store its retrun pose
@@ -83,7 +90,7 @@ class PickAndPlace : public rclcpp::Node {
       Plan pregraspe_plan;
 
       // Planning and execution safty check
-      if (!plan_arm_motion(pregraspe_pose, pregraspe_plan)) return false;       
+      if (!plan_cartesian_motion(pregraspe_pose, pregraspe_plan)) return false;
       RCLCPP_INFO(get_logger(), "Plan calculated.");
     
       // Execute the trajectory 
@@ -203,8 +210,8 @@ class PickAndPlace : public rclcpp::Node {
     using Pose = geometry_msgs::msg::Pose;
 
     static constexpr double kSpeedScale = 0.10;   
-    static constexpr double kApproachDistance = 0.09;  // metres requeted 9 cm 
-    static constexpr double kCloseAngle = 0.64;       // radians
+    static constexpr double kApproachDistance = 0.07;  // metres requeted 9 cm 
+    static constexpr double kCloseAngle = 0.70;       // radians
     
     std::unique_ptr<MoveGroupInterface> arm_;
     std::unique_ptr<MoveGroupInterface> gripper_;
@@ -221,6 +228,17 @@ class PickAndPlace : public rclcpp::Node {
        -1.365010196607841e-05,   // Wrist 3
 
       };    
+    }
+
+    std::vector<double> pre_grasp_position() {
+      return  {
+        -0.6289954947866452,  // Shoulder pan
+        -1.5951461305358254,  // Shoulder lift
+        1.5780543208672357,   // Elbow
+        -1.5951978186194298,  // Wrist 1
+        -1.5276531362798567,  // Wrist 2
+        -2.0253977752323653   // Wrist 3
+      };
     }
 
     geometry_msgs::msg::PoseStamped make_pregrasp_pose() {
